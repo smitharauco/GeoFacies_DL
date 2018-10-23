@@ -2,6 +2,7 @@ import numpy as np
 import plotly.graph_objs as go
 import plotly.offline as py
 import time
+import h5py
 from keras import backend as K
 from keras.datasets import mnist
 from plotly import tools
@@ -36,6 +37,25 @@ def PlotDataAE(X,X_AE,digit_size=28,cmap='jet',Only_Result=True):
     plt.show()  
 
 
+def LoadMPS100(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS100.mat'):
+    if K.image_data_format() == 'channels_first':
+        original_img_size = (1, 100, 100)
+    else:
+        original_img_size = (100, 100, 1)
+    x_Facies = {}
+    f = h5py.File(dirBase)
+    for k, v in f.items():
+        x_Facies[k] = np.array(v)      
+    x_Facies=x_Facies['Dato'].astype('float32')
+    f.close()
+    x_train =x_Facies[0:32000]
+            
+    x_test  =x_Facies[32000:40000]
+    x_train = x_train.astype('float32')
+    x_test  = x_test.astype('float32')
+    x_train = x_train.reshape((x_train.shape[0],) + (original_img_size))
+    x_test =  x_test.reshape((x_test.shape[0],) + (original_img_size))
+    return x_train,x_test
 
 def LoadMPS45(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS45.mat'):
     if K.image_data_format() == 'channels_first':

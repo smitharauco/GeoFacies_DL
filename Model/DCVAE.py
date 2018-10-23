@@ -110,6 +110,7 @@ class DCVAE():
         z_mean = Q_z_mean(hidden)
         z_log_var = Q_z_log_var(hidden)
         self.encoder =Model(inputs, z_mean)
+        self.encoder_var =Model(inputs, z_log_var)
 
         # Sample from latent distributions
         encoding = Lambda(self._sampling_normal, output_shape=(self.latent_cont_dim,))([z_mean, z_log_var])
