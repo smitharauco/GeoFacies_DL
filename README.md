@@ -6,8 +6,8 @@ Some implementation of deep learning for geological facies history matching
 
   * [Installation](#installation)
   * [Study Cases](#cases)
-      + [MPS-45](#mps45)
-      + [MPS-100](#mps100)
+      + [Multipoint Statistics-45](#mps-45)
+      + [Multipoint Statistics-100](#mps-100)
       + Othres
   
 ## Installation
@@ -16,6 +16,6 @@ Some implementation of deep learning for geological facies history matching
     $ sudo pip3 install -r requirements.txt
     
 ## Cases
-### MPS45
-
-### MPS100
+### MPS-45
+### MPS-100
+MPS
