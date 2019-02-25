@@ -8,16 +8,29 @@ from keras.datasets import mnist
 from plotly import tools
 import scipy.io as sio
 import matplotlib.pyplot as plt
+import tensorflow as tf
+
 EPSILON = 1e-8
 
-def PlotHistory(history):
+def PlotHistory(history,listKeys=[],axis_=[]):
+    if len(listKeys)==0:
+        listKeys=history.keys()
     leg=[]
-    for key in history.keys():
+    for key in listKeys:
         plt.plot(history[key])
         plt.title('Training')
         plt.xlabel('epoch') 
         leg.append(key)
+        print(key,"  : ",history[key][-5:-1])
     plt.legend(leg, loc='upper left')
+    if len(axis_)>0:
+        plt.axis(axis_)
+
+# Plot History
+def plot_history(train, test):
+    plt.plot(train, color='red', label='train')
+    plt.plot(test, color='g', label='test')
+    plt.legend()
 
 def PlotDataAE(X,X_AE,digit_size=28,cmap='jet',Only_Result=True):
     plt.figure(figsize=(digit_size*0.5,digit_size*0.5))
@@ -36,8 +49,42 @@ def PlotDataAE(X,X_AE,digit_size=28,cmap='jet',Only_Result=True):
         plt.title('Output')
     plt.show()  
 
+# Plot Images    
+def plot_images(imagens, name='Inputs'):
+    plt.figure(1,figsize=(20,100))
+    plt.title(name)
+    for i in range(10):
+        plt.title(name)
+        plt.subplot(1, 10, i+1)
+        plt.axis('off')
+        plt.imshow((np.argmax(imagens[i],axis=-1)), cmap='jet')
+    plt.show()
+    
 
-def LoadMPS100(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS100.mat'):
+def LoadMPS45(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS45.mat',ShortDate=False,AllTrain=False):
+    if K.image_data_format() == 'channels_first':
+        original_img_size = (1, 45, 45)
+    else:
+        original_img_size = (45, 45, 1)
+    EnsIni= sio.loadmat(dirBase)
+    x_Facies=np.transpose(EnsIni['Dato']).astype('float32')
+    
+    if AllTrain :
+        x_train =x_Facies
+    else:
+        if ShortDate :
+            x_train =x_Facies[0:5000]
+        else :
+            x_train =x_Facies[0:25000]
+            
+    x_test  =x_Facies[25000:29997]
+    x_train = x_train.astype('float32')
+    x_test  = x_test.astype('float32')
+    x_train = x_train.reshape((x_train.shape[0],) + (original_img_size))
+    x_test =  x_test.reshape((x_test.shape[0],) + (original_img_size))
+    return x_train,x_test
+
+def LoadMPS100(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS100.mat',ShortDate=False,AllTrain=False):
     if K.image_data_format() == 'channels_first':
         original_img_size = (1, 100, 100)
     else:
@@ -48,25 +95,15 @@ def LoadMPS100(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS100.mat'):
         x_Facies[k] = np.array(v)      
     x_Facies=x_Facies['Dato'].astype('float32')
     f.close()
-    x_train =x_Facies[0:32000]
+    if AllTrain :
+        x_train =x_Facies
+    else :
+        if ShortDate :
+            x_train =x_Facies[0:5000]
+        else :
+            x_train =x_Facies[0:32000]
             
     x_test  =x_Facies[32000:40000]
-    x_train = x_train.astype('float32')
-    x_test  = x_test.astype('float32')
-    x_train = x_train.reshape((x_train.shape[0],) + (original_img_size))
-    x_test =  x_test.reshape((x_test.shape[0],) + (original_img_size))
-    return x_train,x_test
-
-def LoadMPS45(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS45.mat'):
-    if K.image_data_format() == 'channels_first':
-        original_img_size = (1, 45, 45)
-    else:
-        original_img_size = (45, 45, 1)
-
-    EnsIni= sio.loadmat(dirBase)
-    x_Facies=np.transpose(EnsIni['Dato']).astype('float32')
-    x_train =x_Facies[0:25000]        
-    x_test  =x_Facies[25000:29997]
     x_train = x_train.astype('float32')
     x_test  = x_test.astype('float32')
     x_train = x_train.reshape((x_train.shape[0],) + (original_img_size))
@@ -132,3 +169,22 @@ def sampling_normal(z_mean, z_log_var, out_shape):
     #epsilon = K.random_normal(shape=out_shape, mean=0., stddev=1.)
     epsilon = K.random_normal(shape=(K.shape(z_mean)), mean=0., stddev=1.)
     return z_mean + K.exp(z_log_var / 2) * epsilon
+
+def weight_variable(shape):
+    initial = tf.truncated_normal(shape, stddev=0.1)
+    resultado =tf.Variable(initial,name='w')
+    #print(resultado.name)
+    return resultado
+
+    
+def bias_variable(shape):
+    initial = tf.constant(0.1, shape=shape)
+    resultado = tf.Variable(initial, name='b')
+    #print(resultado.name)
+    return resultado
+
+
+def Dense(prev, input_size, output_size,reuse=tf.AUTO_REUSE):
+    W = weight_variable([input_size, output_size])
+    b = bias_variable([output_size])
+    return tf.matmul(prev, W) + b
