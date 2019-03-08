@@ -32,9 +32,9 @@ def plot_history(train, test):
     plt.plot(test, color='g', label='test')
     plt.legend()
 
-def PlotDataAE(X,X_AE,digit_size=28,cmap='jet',Only_Result=True):
-    plt.figure(figsize=(digit_size*0.5,digit_size*0.5))
-    if (Only_Result):
+def PlotDataAE(X,X_AE,digit_size=28,cmap='jet',Only_Result=True):    
+    if Only_Result:
+        plt.figure(figsize=(digit_size*0.5,digit_size*0.5))
         for i in range(0,20):
             plt.subplot(10,10,(i+1))
             plt.imshow(np.squeeze(X[i].reshape(digit_size,digit_size,1)),cmap=cmap)
@@ -78,10 +78,10 @@ def LoadMPS45(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS45.mat',ShortDa
             x_train =x_Facies[0:25000]
             
     x_test  =x_Facies[25000:29997]
-    x_train = x_train.astype('float32')
-    x_test  = x_test.astype('float32')
     x_train = x_train.reshape((x_train.shape[0],) + (original_img_size))
     x_test =  x_test.reshape((x_test.shape[0],) + (original_img_size))
+    x_train = x_train.astype('float32')
+    x_test  = x_test.astype('float32')
     return x_train,x_test
 
 def LoadMPS100(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS100.mat',ShortDate=False,AllTrain=False):
@@ -104,10 +104,10 @@ def LoadMPS100(dirBase='/work/Home89/PythonUtils/DataSetThesis/MPS100.mat',Short
             x_train =x_Facies[0:32000]
             
     x_test  =x_Facies[32000:40000]
-    x_train = x_train.astype('float32')
-    x_test  = x_test.astype('float32')
     x_train = x_train.reshape((x_train.shape[0],) + (original_img_size))
     x_test =  x_test.reshape((x_test.shape[0],) + (original_img_size))
+    x_train = x_train.astype('float32')
+    x_test  = x_test.astype('float32')
     return x_train,x_test
 
 def kl_normal(z_mean, z_log_var):
