@@ -2,6 +2,7 @@ import numpy as np
 from keras_tqdm import TQDMNotebookCallback
 from keras.layers import Input, Dense, Lambda, Flatten, Reshape, merge,Activation,Add,AveragePooling2D
 from keras.layers import Conv2D, Conv2DTranspose,Dropout,BatchNormalization,MaxPooling2D,UpSampling2D
+from keras.layers import DepthwiseConv2D,Add,AveragePooling2D, Concatenate
 from keras.layers.merge import Concatenate
 from keras.models import Model
 from keras.optimizers import RMSprop,Adam
@@ -16,8 +17,7 @@ class DCVAE():
     """
     Class to handle building and training Deep Convolutional Variational Autoencoders models.
     """
-    def __init__(self, input_shape=(45,45,2),act='sigmoid', KernelDim=(2,2,3,3),latent_dim=200,opt=RMSprop(),multi_GPU=0,
-                 hidden_dim=1024, filters=(2,64, 64, 64),strides=(1,2,1,1),dropout=0):
+    def __init__(self, input_shape=(45,45,2),act='sigmoid', KernelDim=(2,2,3,3),latent_dim=200,opt=RMSprop(),multi_GPU=0,hidden_dim=1024, filters=(2,64, 64, 64),strides=(1,2,1,1),dropout=0):
         """
         Setting up everything.
 
@@ -1029,3 +1029,358 @@ class DCVAE_Inc():
         Sampling from a concrete distribution
         """
         return sampling_concrete(args, (None, self.latent_disc_dim))
+
+class MobileNetVae():
+    """
+    Class to handle building and training Deep Convolutional Variational Autoencoders models.
+    """
+    def __init__(self, input_shape=(100,100,2),act='sigmoid', KernelDim=(3,3,3),latent_dim=200,opt=RMSprop(),multi_GPU=0,
+                 hidden_dim=1024, filters=(64, 64, 64),strides=(1,1,1),dropout=0,load_weights='',trainable=True):
+        """
+        Setting up everything.
+
+        Parameters
+        ----------
+        input_shape : Array-like, shape (num_rows, num_cols, num_channels)
+            Shape of image.
+
+        latent_dim : int
+            Dimension of latent distribution.
+            
+        opt : Otimazer, method for otimization
+        
+        hidden_dim : int
+            Dimension of hidden layer.
+
+        filters : Array-like, shape (num_filters, num_filters, num_filters)
+            Number of filters for each convolution in increasing order of
+            depth.
+        strides : Array-like, shape (num_filters, num_filters, num_filters)
+            Number of strides for each convolution
+            
+        dropout : % de dropout [0,1]
+        
+        """
+        self.act=act
+        self.load_weights=load_weights
+        self.multi_GPU=multi_GPU
+        self.opt = opt
+        self.KernelDim=KernelDim
+        self.model = None
+        self.input_shape = input_shape
+        self.latent_dim = latent_dim
+        self.hidden_dim = hidden_dim
+        self.filters = filters
+        self.strides = strides
+        self.dropout = dropout
+        self.earlystopper = EarlyStopping(patience=10, verbose=0)
+        self.reduce_lr    = ReduceLROnPlateau(factor=0.5, patience=5, min_lr=0.0000005, verbose=1)
+        self.trainable=trainable
+        self.scheduler =True
+        self.learningRateScheduler    = LearningRateScheduler(self.step_decay,verbose=0)
+        if self.scheduler:
+            self.listCall=[self.earlystopper,self.reduce_lr,self.learningRateScheduler, TQDMNotebookCallback()]
+        else:
+            self.listCall=[self.earlystopper,self.reduce_lr, TQDMNotebookCallback()]
+
+    # learning rate schedule
+    def step_decay(self,epoch):
+        self.initial_lrate = K.eval(self.model.optimizer.lr)
+        drop = 0.8
+        epochs_drop = 20.0
+        if (1+epoch)%epochs_drop == 0:
+            #lrate = self.initial_lrate * math.pow(drop, math.floor((1+epoch)/epochs_drop))
+            lrate=self.initial_lrate*drop
+        else:
+            lrate=self.initial_lrate
+
+        return lrate
+
+    def relu6(self,x):      
+        return K.relu(x, max_value=6)
+
+    def acc_pred(self,y_true, y_pred):           
+        return K.cast(K.equal(K.argmax(y_true, axis=-1),K.argmax(y_pred, axis=-1)),K.floatx())
+
+    def _make_divisible(self,v, divisor, min_value=None):
+        if min_value is None:
+            min_value = divisor
+        new_v = max(min_value, int(v + divisor / 2) // divisor * divisor)
+        # Make sure that round down does not go down by more than 10%.
+        if new_v < 0.9 * v:
+            new_v += divisor
+        return new_v
+
+    def _inverted_res_block(self,inputs, expansion, stride, alpha, filters, block_id, skip_connection, rate=1):
+        in_channels = inputs._keras_shape[-1]
+        pointwise_conv_filters = int(filters * alpha)
+        pointwise_filters = self._make_divisible(pointwise_conv_filters, 8)
+        x = inputs
+        prefix = 'ex_Cv_{}_'.format(block_id)
+        if block_id:
+            # Expand
+            x = Conv2D(expansion * in_channels, kernel_size=1, padding='same',
+                       use_bias=False, activation=None,
+                       name=prefix + 'exd')(x)
+            x = BatchNormalization(epsilon=1e-3, momentum=0.999,
+                                   name=prefix + 'exd_BN')(x)
+            x = Activation(self.relu6, name=prefix + 'exd_relu')(x)
+        else:
+            prefix = 'ex_Cv_'
+        # Depthwise
+        x = DepthwiseConv2D(kernel_size=3, strides=stride, activation=None,
+                            use_bias=False, padding='same', dilation_rate=(rate, rate),
+                            name=prefix + 'depthwise')(x)
+        x = BatchNormalization(epsilon=1e-3, momentum=0.999,
+                               name=prefix + 'depthwise_BN')(x)
+
+        x = Activation(self.relu6, name=prefix + 'depthwise_relu')(x)
+
+        # Project
+        x = Conv2D(pointwise_filters,
+                   kernel_size=1, padding='same', use_bias=False, activation=None,
+                   name=prefix + 'projt')(x)
+        x = BatchNormalization(epsilon=1e-3, momentum=0.999,
+                               name=prefix + 'projt_BN')(x)
+
+        if skip_connection:
+            return Add(name=prefix + 'add')([inputs, x])
+
+        # if in_channels == pointwise_filters and stride == 1:
+        #    return Add(name='res_connect_' + str(block_id))([inputs, x])
+        return x
+
+        
+    def fit(self, x_train=None, num_epochs=1, batch_size=100, val_split=.1,reset_model=True,verbose=0,isGenerator=False,generator=None,validation_data=None,steps_per_epoch=10,validation_steps=10):
+        """
+        Training model
+        """
+        self.batch_size = batch_size
+        self.num_epochs = num_epochs
+        if reset_model:
+            self._set_model()
+
+        # Update parameters
+        if self.multi_GPU==0:
+            self.model.compile(optimizer=self.opt, loss=self._vae_loss,metrics=[self.acc_pred])
+            if isGenerator:
+                self.history=self.model.fit_generator(generator, steps_per_epoch=steps_per_epoch,
+                       epochs=self.num_epochs,
+                       verbose=verbose,
+                       validation_data=validation_data,
+                       validation_steps=validation_steps,
+                       callbacks=self.listCall)
+
+            else:
+                self.history=self.model.fit(x_train, x_train,
+                           epochs=self.num_epochs,
+                           batch_size=self.batch_size,
+                           verbose=verbose,
+                           shuffle=True,
+                           callbacks=self.listCall,
+                           validation_split=val_split)
+            
+        else:
+            self.modelGPU=multi_gpu_model(self.model, gpus=self.multi_GPU)        
+            self.modelGPU.compile(optimizer=self.opt, loss=self._vae_loss,metrics=[self.acc_pred])
+            if isGenerator:
+                self.history=self.modelGPU.fit_generator(generator, steps_per_epoch=steps_per_epoch,
+                       epochs=self.num_epochs,
+                       verbose=verbose,
+                       validation_data=validation_data,
+                       validation_steps=validation_steps,
+                       callbacks=self.listCall)
+
+            else:
+                self.history=self.modelGPU.fit(x_train, x_train,
+                       epochs=self.num_epochs,
+                       batch_size=self.batch_size,
+                       verbose=verbose,
+                       shuffle=True,
+                       callbacks=self.listCall,
+                       validation_split=val_split)
+
+
+
+    def _set_model(self):
+        """
+        Setup model (method should only be called in self.fit())
+        """
+        print("Setting up model...")
+        alpha=1
+        OS=8
+        # Encoder
+        inputs = Input(batch_shape=(None,) + self.input_shape)
+        self.inputs=inputs
+        # Instantiate encoder layers  based MobileNet     
+        x = Conv2D(64,kernel_size=3,strides=(2, 2),padding='same',use_bias=False, name='Conv')(inputs)
+        x = BatchNormalization(epsilon=1e-3, momentum=0.999, name='Conv_BN')(x)
+        x = Activation(self.relu6, name='Conv_Relu6')(x)
+
+        x = self._inverted_res_block(x, filters=16, alpha=alpha, stride=1,
+                                    expansion=1, block_id=0, skip_connection=False)
+        x = self._inverted_res_block(x, filters=24, alpha=alpha, stride=2,
+                                expansion=6, block_id=1, skip_connection=False)
+        x = self._inverted_res_block(x, filters=24, alpha=alpha, stride=1,
+                                    expansion=6, block_id=2, skip_connection=True)
+        x = self._inverted_res_block(x, filters=32, alpha=alpha, stride=2,
+                                expansion=6, block_id=3, skip_connection=False)
+        x = self._inverted_res_block(x, filters=32, alpha=alpha, stride=1,
+                        expansion=6, block_id=4, skip_connection=True)
+        x = self._inverted_res_block(x, filters=32, alpha=alpha, stride=1,
+                                expansion=6, block_id=5, skip_connection=True)
+        # stride in block 6 changed from 2 -> 1, so we need to use rate = 2
+        x = self._inverted_res_block(x, filters=64, alpha=alpha, stride=1,  # 1!
+                            expansion=6, block_id=6, skip_connection=False)
+        x = self._inverted_res_block(x, filters=64, alpha=alpha, stride=1, rate=2,
+                        expansion=6, block_id=7, skip_connection=True)
+        x = self._inverted_res_block(x, filters=64, alpha=alpha, stride=1, rate=2,
+                        expansion=6, block_id=8, skip_connection=True)
+        x = self._inverted_res_block(x, filters=64, alpha=alpha, stride=1, rate=2,
+                        expansion=6, block_id=9, skip_connection=True)
+
+        x = self._inverted_res_block(x, filters=96, alpha=alpha, stride=1, rate=2,
+                            expansion=6, block_id=10, skip_connection=False)
+        x = self._inverted_res_block(x, filters=96, alpha=alpha, stride=1, rate=2,
+                            expansion=6, block_id=11, skip_connection=True)
+        x = self._inverted_res_block(x, filters=96, alpha=alpha, stride=1, rate=2,
+                            expansion=6, block_id=12, skip_connection=True)
+
+        x = self._inverted_res_block(x, filters=160, alpha=alpha, stride=1, rate=2,  # 1!
+                            expansion=6, block_id=13, skip_connection=False)
+        x = self._inverted_res_block(x, filters=160, alpha=alpha, stride=1, rate=4,
+                            expansion=6, block_id=14, skip_connection=True)
+        x = self._inverted_res_block(x, filters=160, alpha=alpha, stride=1, rate=4,
+                            expansion=6, block_id=15, skip_connection=True)
+    
+        x = self._inverted_res_block(x, filters=320, alpha=alpha, stride=1, rate=4,
+                            expansion=6, block_id=16, skip_connection=False)
+
+        Q = AveragePooling2D(pool_size=(int(np.ceil(self.input_shape[0] / OS)), int(np.ceil(self.input_shape[1] / OS))))(x)
+            
+        Q_1 = Flatten()
+        #Q_2 = Dense(self.hidden_dim)
+        #Q_3= BatchNormalization()
+        #Q_4= Activation('relu')
+
+        Q_z_mean = Dense(self.latent_dim)
+        Q_z_log_var = Dense(self.latent_dim)
+
+        # Set up encoder
+        #x = Q_1(Q)
+        #x = Q_2(x)
+        #x = Q_3(x)
+        #hidden = Q_4(x)
+        hidden = Q_1(Q)
+        # Parameters for continous latent distribution
+        z_mean = Q_z_mean(hidden)
+        z_log_var = Q_z_log_var(hidden)
+        self.encoder =Model(inputs, z_mean)
+
+
+        # Sample from latent distributions
+        encoding = Lambda(self._sampling_normal, output_shape=(self.latent_dim,))([z_mean, z_log_var])
+        self.Encoder = encoding
+        # Generator
+        # Instantiate generator layers to be able to sample from latent
+        # distribution later
+        out_shape = (int(np.ceil(self.input_shape[0] / 4)),
+                     int(np.ceil(self.input_shape[1] / 4)),10)
+        
+        #G_0 = Dense(self.hidden_dim)
+        #G_1 = BatchNormalization()
+        #G_2 = Activation('relu')
+        G_3 = Dense(np.prod(out_shape))
+        #G_4 = BatchNormalization()
+        #G_5 = Activation('relu')
+        G_6 = Reshape(out_shape)
+        G_7 = Conv2DTranspose(16, (3, 3), padding='same',strides=1, activation='relu')
+        G_8 = Conv2DTranspose(32, (3, 3), padding='same',strides=2, activation='relu')
+        G_9 = Conv2DTranspose(32, (2, 2), padding='same',strides=2, activation='relu')
+        G_10= BilinearUpsampling(output_size=(self.input_shape[0],self.input_shape[1])) 
+        G_11= Conv2D(self.input_shape[2],3,padding='same', activation=self.act, name='generated')    
+
+        # Apply generator layers
+        #x = G_0(encoding)
+        #x = G_1(x)
+        #x = G_2(x)
+        #x = G_3(x)
+        x = G_3(encoding)        
+
+        x = G_6(x)
+        x = G_7(x)
+        x = G_8(x)
+        x = G_9(x)
+        x = G_10(x)
+
+        generated = G_11(x)
+
+        self.model =Model(inputs, generated)
+        # Set up generator
+        inputs_G = Input(batch_shape=(None, self.latent_dim))
+        x = G_3(inputs_G)
+        #x = G_4(x)
+        #x = G_5(x)
+        x = G_6(x)
+        x = G_7(x)
+        x = G_8(x)
+        x = G_9(x)
+        x = G_10(x)
+ 
+        generated_G = G_11(x)
+        self.generator = Model(inputs_G, generated_G)
+
+        # Store latent distribution parameters
+        self.z_mean = z_mean
+        self.z_log_var = z_log_var
+
+        # Compile models
+        #self.opt = RMSprop()
+        self.model.compile(optimizer=self.opt, loss=self._vae_loss,metrics=[self.acc_pred])
+        # Loss and optimizer do not matter here as we do not train these models
+        self.generator.compile(optimizer=self.opt, loss='mse')
+        self.model.summary()
+        print("Completed model setup.")
+
+    def Encoder(self, x_test):
+        """
+        Return predicted result from the encoder model
+        """
+        return self.Encoder.predict(x_test)
+
+    def Decoder(self,x_test,binary=False):
+        """
+        Return predicted result from the DCVAE model
+        """
+        if binary:
+            return np.argmax(self.model.predict(x_test),axis=-1)
+        return self.model.predict(x_test)
+        
+    def generate(self, number_latent_sample=20,std=1,binary=False):
+        """
+        Generating examples from samples from the latent distribution.
+        """
+        latent_sample=np.random.normal(0,std,size=(number_latent_sample,self.latent_dim))
+        if binary:
+            return np.argmax(self.generator.predict(latent_sample),axis=-1)
+        return self.generator.predict(latent_sample)
+
+    def _vae_loss(self, x, x_generated):
+        """
+        Variational Auto Encoder loss.
+        """
+        x = K.flatten(x)
+        x_generated = K.flatten(x_generated)
+        reconstruction_loss = self.input_shape[0] * self.input_shape[1] * \
+                                  binary_crossentropy(x, x_generated)
+        kl_normal_loss = kl_normal(self.z_mean, self.z_log_var)
+        kl_disc_loss = 0
+        return reconstruction_loss + kl_normal_loss + kl_disc_loss
+
+    def _sampling_normal(self, args):
+        """
+        Sampling from a normal distribution.
+        """
+        z_mean, z_log_var = args
+        return sampling_normal(z_mean, z_log_var, (None, self.latent_dim))
+    

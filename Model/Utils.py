@@ -12,6 +12,17 @@ import tensorflow as tf
 
 EPSILON = 1e-8
 
+def Save_Model(modelo,name):
+    def save(model, model_name):
+        model_path = "%s.json" % model_name
+        weights_path = "%s_weights.hdf5" % model_name
+        options = {"file_arch": model_path, 
+                   "file_weight": weights_path}
+        json_string = model.to_json()
+        open(options['file_arch'], 'w').write(json_string)
+        model.save_weights(options['file_weight'])
+    save(modelo,name)
+
 def PlotHistory(history,listKeys=[],axis_=[]):
     if len(listKeys)==0:
         listKeys=history.keys()
