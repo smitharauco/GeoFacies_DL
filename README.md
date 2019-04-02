@@ -9,6 +9,7 @@ Specifically, we use a convolutional variational autoencoder and the ensemble sm
 
 We tested the parameterization in three synthetic history-matching problems with channelized facies.
 We focus on this type of facies because they are among the most challenging to preserve after the assimilation of data. 
+Our experiments were presented in the article "Towards a Robust Parameterization for Conditioning Facies Models Using Deep Variational Autoencoders and Ensemble Smoother" using a function network "DCVAE" of this repository. Also we included new variants of convolutional variational autoencoder.
 
 # Conclusions
 The parameterization showed promising results outperforming previous methods and generating well-defined channelized facies.
