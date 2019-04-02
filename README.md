@@ -19,3 +19,9 @@ The parameterization showed promising results outperforming previous methods and
 Canchumuni, S. W., Emerick, A. A., & Pacheco, M. A. C. (2018). Towards a Robust Parameterization for Conditioning Facies Models Using Deep Variational Autoencoders and Ensemble Smoother. arXiv preprint arXiv:1812.06900. 
 
 <a href="http://export.arxiv.org/abs/1812.06900" rel="nofollow">http://export.arxiv.org/abs/1812.06900</a>
+
+Emerick, A. A., & Reynolds, A. C. (2013). Ensemble smoother with multiple data assimilation. Computers & Geosciences.
+
+<a href="http://export.arxiv.org/abs/1812.06900" rel="nofollow">
+https://www.sciencedirect.com/science/article/pii/S0098300412000994</a>
+
