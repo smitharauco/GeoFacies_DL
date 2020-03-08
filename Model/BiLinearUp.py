@@ -2,6 +2,7 @@ from keras.engine import Layer
 from keras.engine import InputSpec
 from keras import backend as K
 from keras.utils import conv_utils
+import tensorflow as tf
 
 class BilinearUpsampling(Layer):
     """Just a simple bilinear upsampling layer. Works only with TF.
@@ -42,11 +43,11 @@ class BilinearUpsampling(Layer):
 
     def call(self, inputs):
         if self.upsampling:
-            return K.tf.image.resize_bilinear(inputs, (inputs.shape[1] * self.upsampling[0],
+            return tf.image.resize_bilinear(inputs, (inputs.shape[1] * self.upsampling[0],
                                                        inputs.shape[2] * self.upsampling[1]),
                                               align_corners=True)
         else:
-            return K.tf.image.resize_bilinear(inputs, (self.output_size[0],
+            return tf.image.resize_bilinear(inputs, (self.output_size[0],
                                                        self.output_size[1]),
                                               align_corners=True)
 
