@@ -1,0 +1,13 @@
+# Don't track content of these folders
+HistoryMatching/__pycache__/
+#Model/TrainModel/
+Model/__pycache__/
+.ipynb_checkpoints/
+
+Model/TrainModel/*.json
+Model/TrainModel/*.hdf5
+*.DS_Store
+*.pyc
+*.tfrecords
+*.hdf5
+*.json
