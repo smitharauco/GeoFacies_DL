@@ -1,0 +1,21 @@
+{
+  "embeddings": [
+    {
+      "tensorName": "Tensoron",
+      "tensorShape": [
+        294,
+        6400
+      ],
+      "tensorPath": "https://raw.githubusercontent.com/bermudezjose/metadados/master/feat_covid.tsv",
+      "metadataPath": "https://raw.githubusercontent.com/bermudezjose/metadados/master/covid_metadata.tsv",
+      "bookmarksPath": "https://raw.githubusercontent.com/bermudezjose/metadados/master/state.txt",
+      "sprite": {
+        "imagePath": "https://raw.githubusercontent.com/bermudezjose/metadados/master/sprite_covid_image.png",
+        "singleImageDim": [
+          224,
+          224
+        ]
+      }
+    }
+  ]
+}
