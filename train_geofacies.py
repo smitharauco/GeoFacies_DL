@@ -153,9 +153,9 @@ def main():
         hidden_dim=args.hidden_dim,latent_dim=args.latent_dim,isTerminal=True,opt=opt,dropout=args.dropout, filepath = args.save_path_weights)
         model.fit_generator(x_train,
                             num_epochs=args.nb_epochs, verbose=1, 
-                            steps_per_epoch = nt,
+                            steps_per_epoch = nt//args.batch_size,
                             val_set = x_val,
-                            validation_steps = vs)
+                            validation_steps = vs//args.batch_size)
 
 if __name__ == '__main__':
     main()
