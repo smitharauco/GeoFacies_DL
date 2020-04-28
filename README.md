@@ -22,7 +22,7 @@ from Model.Utils import download_tfrecord
 download_tfrecord(name_dataset = "MPS45", test = True)
 ```
 where: 
-'name_dataset' represente the name of the DataSet
+'name_dataset' represent the name of the DataSet
 
 Please contact us to has any problem to download the dataset.
 
@@ -54,7 +54,7 @@ python train_geofacies.py --train_dataset_path DataSet/MPS60/train.tfrecords --t
 # train model using a reservoir field of (60,60)
 python train_geofacies.py --train_dataset_path DataSet/MPS60/train.tfrecords --test_dataset_path DataSet/MPS60/test_val.tfrecords --filters 32 --model GAN2D_AE --kernel_dim 4
 # train model using a reservoir field of (40,200)
-python train_geofacies.py --train_dataset_path DataSet/MPS40x200/train.tfrecords --test_dataset_path DataSet/MPS40x200/test_val.tfrecords --model GAN2D_AE --filters 32--latent_dim 1024 --kernel_dim 5 --batch_size 64
+python train_geofacies.py --train_dataset_path DataSet/MPS40x200/train.tfrecords --test_dataset_path DataSet/MPS40x200/test_val.tfrecords --model GAN2D_AE --filters 32 --latent_dim 1024 --kernel_dim 5 --batch_size 64
 ``` 
 ### Train Generative adversarial networks with Encoder and Wasserstein Loss
 ```bash 
