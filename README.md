@@ -61,12 +61,12 @@ python train_geofacies.py --train_dataset_path DataSet/MPS40x200/train.tfrecords
 # train model using a reservoir field of (60,60)
 python train_geofacies.py --train_dataset_path DataSet/MPS60/train.tfrecords --test_dataset_path DataSet/MPS60/test_val.tfrecords --filters 32 --model WGAN2D_AE --kernel_dim 4
 # train model using a reservoir field of (40,200)
-python train_geofacies.py --train_dataset_path DataSet/MPS40x200/train.tfrecords --test_dataset_path DataSet/MPS40x200/test_val.tfrecords --model WGAN2D_AE --filters 32--latent_dim 1024 --kernel_dim 5 --batch_size 64
+python train_geofacies.py --train_dataset_path DataSet/MPS40x200/train.tfrecords --test_dataset_path DataSet/MPS40x200/test_val.tfrecords --model WGAN2D_AE --filters 32 --latent_dim 1024 --kernel_dim 5 --batch_size 64
 ``` 
 ### Train Auto-Encoding Generative Adversarial Networks (AlphaGans)
 ```bash 
 # train model using a reservoir field of (60,60)
-python train_geofacies.py --train_dataset_path /DataSet/MPS60/train.tfrecords --test_dataset_path DataSet/MPS60/test_val.tfrecords --model AlphaGAN --kernel_dim 5 --alpha 100 
+python train_geofacies.py --train_dataset_path DataSet/MPS60/train.tfrecords --test_dataset_path DataSet/MPS60/test_val.tfrecords --model AlphaGAN --kernel_dim 5 --alpha 100 
 # train model using a reservoir field of (40,200)
 python train_geofacies.py --train_dataset_path DataSet/MPS40x200/train.tfrecords --test_dataset_path DataSet/MPS40x200/test_val.tfrecords --latent_dim 1024 --model AlphaGAN  --alpha 100 --kernel_dim 5
 
