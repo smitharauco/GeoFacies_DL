@@ -107,7 +107,8 @@ def Contitional_ES_MDA(alp,Corr,position,obs,R,m_x,m_f,dim_shape,redeVAE):
         Obs_sim=  np.array(Obs_sim).T
         print('Erro ite_',t, ' : ' ,sum(sum(abs(Obs_sim-obs))))    
         m_x = ES_MDA(m_f.shape[1],m_x,obs,Obs_sim,Alpha[t],R,Corr,2)
-        m_f = UpdateStateFacies(m_x,dim_shape[0],dim_shape[1],redeVAE)
+        #m_f = UpdateStateFacies(m_x,dim_shape[0],dim_shape[1],redeVAE)
+        m_f = redeVAE.predict(m_x)
     Obs_sim = [((GetFaciesData(m_f[:,i],dim_shape,position,''))) for i in range(m_f.shape[1])]
     Obs_sim=  np.array(Obs_sim).T
     print('Erro End: ',sum(sum(abs(Obs_sim-obs))))
