@@ -22,6 +22,8 @@ from keras.utils import to_categorical
 from Model.BiLinearUp import BilinearUpsampling
 from Model.Utils import Save_Model, PlotDataAE
 from Model.UtilsPCA import ComputePCA
+from Model.SpectralNormalizationLayers import DenseSN, ConvSN2D
+from keras_layer_normalization import LayerNormalization
 
 class Utilities(object):    
     @staticmethod
@@ -76,7 +78,7 @@ class Utilities(object):
     @staticmethod    
     def build_pretrained_model(model_file, isTrain=True):
         with open(model_file + '.json', 'r') as f:
-            model = model_from_json(f.read(), custom_objects={'BilinearUpsampling': BilinearUpsampling()})
+            model = model_from_json(f.read(), custom_objects={'BilinearUpsampling': BilinearUpsampling(),'DenseSN':DenseSN,'ConvSN2D':ConvSN2D, 'LayerNormalization': LayerNormalization()})
         model.load_weights(model_file + '_weights.hdf5')
         if isTrain is False:
             model.trainable = False

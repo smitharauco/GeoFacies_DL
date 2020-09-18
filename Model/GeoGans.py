@@ -37,11 +37,12 @@ class GAN2D_MPS(object):
     def __init__(self, input_shape,
                 d_filters=32, g_filters=32, e_filters=32,
                 d_ksize=4, g_ksize=4, e_ksize=4, z_size=500, batch_size=64, d_drop=False,
-                d_lr=0.0002, g_lr=0.0002, e_lr=0.001, z_lr=0.1, beta1=0.5,
+                d_lr=0.0002, g_lr=0.0002, e_lr=0.001, z_lr=0.1, beta1=0.5,SpectralNormalization=False,
                 model_file=None, saving_path=None, name='geo_GANs_', summary=True
                 ):
         if saving_path is None:
             saving_path = './'
+        self.SpectralNormalization=SpectralNormalization
         self.saving_path = saving_path
         self.n_rows = input_shape[0]
         self.n_cols = input_shape[1]
@@ -84,7 +85,12 @@ class GAN2D_MPS(object):
         self.decoder = self.nets.build_generator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims), z_size=self.z_size,
                                                    filters=self.g_filters, k_size=self.g_ksize, model_file=model_file_gen,
                                                    summary=summary)
-        self.discriminator = self.nets.build_discriminator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims),
+        if self.SpectralNormalization:
+            self.discriminator = self.nets.build_discriminator2D_SN(model_shape=(self.n_rows,self.n_cols, self.c_dims),
+                                                                    filters=self.d_filters, k_size=self.d_ksize, drop=self.d_drop,
+                                                             model_file=model_file_dis,summary=summary)
+        else :
+            self.discriminator = self.nets.build_discriminator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims),
                                                              filters=self.d_filters, k_size=self.d_ksize, drop=self.d_drop,
                                                              model_file=model_file_dis,
                                                              summary=summary)
@@ -391,12 +397,12 @@ class GAN2D_MPS(object):
 
 class WGAN2D_MPS(object):
     def __init__(self, input_shape,
-                 d_filters=32, g_filters=32, e_filters=32,
+                 d_filters=32, g_filters=32, e_filters=32,SpectralNormalization=False,
                  d_ksize=5, g_ksize=4, e_ksize=4, z_size=500, batch_size=64,
                  d_lr=5e-5, g_lr=5e-5, e_lr=0.001, z_lr=0.1, beta1=0.5, clip_value=0.05,
                  model_file=None, saving_path=None, name='geo_WGAN_', summary=True
                 ):
-
+        self.SpectralNormalization = SpectralNormalization
         if saving_path is None:
             saving_path = './'
         self.saving_path = saving_path
@@ -426,6 +432,7 @@ class WGAN2D_MPS(object):
         self.model_file = model_file
         self.summary = summary
         self.build_model(self.model_file, summary=self.summary)
+        self.history =  dict({'loss_d':[],'loss_g':[],'acc':[]})
     
     def build_model(self, model_file=None, model_file_enc=None, summary=False):
         
@@ -441,7 +448,12 @@ class WGAN2D_MPS(object):
         self.decoder = self.nets.build_generator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims), z_size=self.z_size,
                                                    filters=self.g_filters, k_size=self.g_ksize, model_file=model_file_gen,
                                                    summary=summary)
-        self.discriminator = self.nets.build_discriminator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims),
+        if self.SpectralNormalization:
+            self.discriminator = self.nets.build_discriminator2D_SN(model_shape=(self.n_rows,self.n_cols, self.c_dims),
+                                                                    filters=self.d_filters, k_size=self.d_ksize, drop=False,
+                                                             model_file=model_file_dis,summary=summary)
+        else :
+            self.discriminator = self.nets.build_discriminator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims),
                                                              filters=self.d_filters, k_size=self.d_ksize, model_file=model_file_dis,
                                                              drop=False, summary=summary)
         self.encoder = self.nets.build_encoder2D(model_shape=(self.n_rows, self.n_cols, self.c_dims), z_size=self.z_size,
@@ -572,6 +584,7 @@ class WGAN2D_MPS(object):
         for iteration in range(iterations*epochs):
             #  Train Discriminator 
             n_critic = 100 if g_step < 25 or (g_step + 1) % 500 == 0 else 5
+            loss_d_by_step=[]
             for _ in range(n_critic):
                 z_samples = np.random.normal(0, 1, size=[self.batch_size, self.z_size]).astype(np.float32)
                 # Select a random batch of images
@@ -581,8 +594,376 @@ class WGAN2D_MPS(object):
                 _, d_loss = self.sess.run([d_optim, self.d_loss],
                                           feed_dict={self.real_img: imgs,
                                                      self.z_noise: z_samples})
-                self.sess.run(clip_updates)
-                loss_D.append(d_loss)    
+                if not self.SpectralNormalization:
+                    self.sess.run(clip_updates)
+                loss_d_by_step.append(d_loss)
+            
+            loss_D.append(np.array(loss_d_by_step).mean())    
+            self.history['loss_d'].append(np.array(loss_d_by_step).mean())
+
+            #  Train Generator
+            z_samples = np.random.normal(0, 1, size=[self.batch_size, self.z_size]).astype(np.float32)
+            # Update G network
+            _, g_loss = self.sess.run([g_optim, self.g_loss],
+                                      feed_dict={self.z_noise: z_samples})
+            g_step += 1
+            loss_G.append(g_loss)
+            self.history['loss_g'].append(g_loss)
+            if (iteration+1) % (iterations*plot_freq) == 0:
+                if plots:
+                    print('Random realizations ...')
+                    z_samples = np.random.normal(0, 1, size=[num_plots, self.z_size]).astype(np.float32)
+                    x_generated = np.argmax(self.decoder.predict(z_samples), axis=-1)
+                    PlotDataAE([], x_generated, digit_size=(self.n_rows, self.n_cols), cmap='jet', Only_Result=False, num=num_plots)
+                    
+            # Reconstruction accuracy
+            if (iteration+1) % (iterations) == 0:
+                # Select a random batch of images
+                idx = np.random.randint(0, data_val.shape[0], self.batch_size)
+                imgs = data_val[idx]
+                self.sess.run(init_zvars)
+                np.random.shuffle(data_val)
+                for _ in range(n_iterations):                
+                    _, g_loss_, acc_ = self.sess.run([z_optim, self.gz_loss, self.accuracy_z],
+                                                        feed_dict={self.real_img: data_val[:self.batch_size]})
+                
+                # print('Iteration: ', iteration+1, '  G loss: ', g_loss_, '  Accuracy: ', acc_.mean())
+                self.history['acc'].append(acc_)
+                if 100*np.mean(acc_) >= th_acc:
+                    early_stop = True
+                if early_stop:    
+                    if (best_loss_D > np.abs(np.mean(loss_D))) and 100*np.mean(acc_) >= th_acc:
+                        best_loss_D = np.abs(np.mean(loss_D))
+                        patience_trn = patience
+                        Save_Model(self.discriminator, self.saving_path + self.discriminator_name)
+                        Save_Model(self.decoder, self.saving_path + self.decoder_name)
+                        print('Saving check point ...')
+                        saved_checkpoint = True
+                    else:
+                        patience_trn -= 1
+                    if patience_trn < 0:
+                        print('Training stoped ...')
+                        break
+                
+                print('Iteration: ', iteration+1, '  D loss: ', np.mean(loss_D), '  G loss: ', np.mean(loss_G), '  Accuracy: ', acc_.mean())
+                loss_D, loss_G = [], []
+        if saved_checkpoint is False:
+            Save_Model(self.discriminator, self.saving_path + self.discriminator_name)
+            Save_Model(self.decoder, self.saving_path + self.decoder_name)
+            print('Saving check point, last iteration')
+        print('Restauring best Discriminator and Generator Models ...')
+        self.build_model(model_file=self.saving_path+self.name_base, model_file_enc=None, summary=False)
+
+    def fit_encoder(self,
+                    data_trn,
+                    data_val=None,
+                    epochs=1,
+                    best_acc=-np.inf,
+                    patience=50,
+                    split=0.9,
+                    plots=True,
+                    num_plots=4,
+                    plot_freq=2,
+                    reset_model=True
+                    ):
+
+        e_optim = tf.compat.v1.train.AdamOptimizer(self.e_lr, beta1=self.beta1).minimize(self.e_loss, var_list=self.e_vars)
+        self.sess = K.get_session()
+        init_op = tf.variables_initializer(self.e_vars)
+        if reset_model:
+            self.build_model(model_file=self.saving_path+self.name_base, model_file_enc=None, summary=False)
+            e_optim = tf.compat.v1.train.AdamOptimizer(self.e_lr, beta1=self.beta1).minimize(self.e_loss, var_list=self.e_vars)
+            self.sess = K.get_session()
+            init_op = tf.variables_initializer(self.e_vars)
+            self.sess.run(init_op)
+            print ("Initializing encoder variables ...")
+
+        # Setting training and validation samples
+        if data_val is None:
+            np.random.shuffle(data_trn)
+            data_val = data_trn[int(split*len(data_trn)):]
+            data_trn = data_trn[:int(split*len(data_trn))]
+
+        print("Starting Encoder training ...")
+        patience_trn = patience
+        for epoch in range(10*epochs):
+            np.random.shuffle(data_trn)
+            number_of_batches = data_trn.shape[0] // self.batch_size
+            for index in range(0, number_of_batches):
+                volumes_batch = data_trn[index * self.batch_size:(index + 1) * self.batch_size]
+                self.sess.run([e_optim], 
+                              feed_dict={self.real_img: volumes_batch})
+            # Validation
+            number_of_batches = data_val.shape[0] // self.batch_size
+            loss_E, loss_D, Acc = [], [], []
+            for index in range(0, number_of_batches):
+                volumes_batch = data_val[index * self.batch_size:(index + 1) * self.batch_size]
+                errE, acc_e, deco_imgs = self.sess.run([self.e_loss, self.accuracy_e, self.deco_img],
+                                                             feed_dict={self.real_img: volumes_batch})
+                loss_E.append(errE)
+                # loss_D.append(errD)
+                Acc.append(acc_e)
+
+            if np.mean(Acc) > best_acc:
+                best_acc = np.mean(Acc)
+                patience_trn = patience
+                if self.saving_path:
+                    Save_Model(self.encoder, self.saving_path + self.encoder_name)
+                if plots and index % plot_freq:
+                    real_samples = data_trn[:num_plots]
+                    deco_samples = self.decoder.predict(self.encoder.predict(real_samples))
+                    real_samples = np.argmax(real_samples, axis=-1)
+                    deco_samples = np.argmax(deco_samples, axis=-1)
+                    diff = np.abs(volumes_batch - deco_imgs)
+                    PlotDataAE([], diff, digit_size=(self.n_rows, self.n_cols), Only_Result=False, num=num_plots)                
+            else:
+                patience_trn -= 1
+            if patience_trn < 0:
+                print('Training stoped using early stop ...')
+                break
+            print('epoch', epoch+1, 'E loss ->', np.mean(loss_E), 'Acc ->', np.mean(Acc))
+            # print('epoch', epoch+1, 'D loss ->', np.mean(loss_D), 'E loss ->', np.mean(loss_E), 'Acc ->', np.mean(Acc))
+        print("Training stoped, last epoch reached ... ")
+
+    def Encoder(self, x_test):
+        """
+        Return predicted result from the encoder model
+        """
+        return self.encoder.predict(x_test)
+    
+    def Decoder(self, x_test, binary=False):
+        """
+        Return predicted result from the AE model
+        """
+        if binary:
+            return np.argmax(self.model.predict(x_test), axis=-1)
+        return self.model.predict(x_test)
+        
+    def generate(self, number_latent_sample=20, std=1, binary=False):
+        """
+        Generating examples from samples from the latent distribution.
+        """
+        latent_sample = np.random.normal(0, std, size=(number_latent_sample, self.z_size))
+        if binary:
+            return np.argmax(self.decoder.predict(latent_sample),axis=-1)
+        return self.decoder.predict(latent_sample)
+
+    def load_model(self, model_file, summary=True):
+        model = self.utils.build_pretrained_model(model_file)
+        if summary:
+            model.summary()
+        return model
+
+class WGANGP2D_MPS(object):
+    def __init__(self, input_shape,
+                 d_filters=32, g_filters=32, e_filters=32, SpectralNormalization=False,
+                 d_ksize=4, g_ksize=4, e_ksize=4, z_size=500, batch_size=64,
+                 d_lr=0.0002, g_lr=0.0002, e_lr=0.001, z_lr=0.1, beta1=0.5, layerNormalization=True,
+                 model_file=None, saving_path=None, name='geo_WGANGP_', summary=True
+                ):
+        self.SpectralNormalization = SpectralNormalization
+        if saving_path is None:
+            saving_path = './'
+        self.saving_path = saving_path
+        self.n_rows = input_shape[0]
+        self.n_cols = input_shape[1]
+        self.c_dims = input_shape[2]
+        self.name_base = name+'z_'+str(z_size)+'_'+str(self.n_rows)+'x'+str(self.n_cols)
+        self.discriminator_name = self.name_base + '_discriminator'
+        self.decoder_name = self.name_base + '_decoder'
+        self.encoder_name = self.name_base + '_encoder'
+        self.batch_size = batch_size        
+        self.d_filters=d_filters
+        self.g_filters=g_filters
+        self.e_filters=e_filters
+        self.d_ksize=d_ksize
+        self.g_ksize=g_ksize
+        self.e_ksize=e_ksize
+        self.z_size = z_size        
+        self.d_lr = d_lr
+        self.g_lr = g_lr
+        self.e_lr = e_lr
+        self.z_lr = z_lr
+        self.beta1 = beta1
+        self.ln = layerNormalization
+        self.utils = Utilities()
+        self.nets = Networks()
+        self.model_file = model_file
+        self.summary = summary
+        self.build_model(self.model_file, summary=self.summary)
+    
+    def build_model(self, model_file=None, model_file_enc=None, summary=False):
+        
+        if model_file is not None:
+            model_file_dis=model_file+'_discriminator'
+            model_file_gen=model_file+'_decoder'
+        else:
+            model_file_dis=model_file
+            model_file_gen=model_file
+
+        # build network models
+        K.clear_session()
+        self.decoder = self.nets.build_generator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims), z_size=self.z_size,
+                                                   filters=self.g_filters, k_size=self.g_ksize, model_file=model_file_gen,
+                                                   summary=summary)
+        if self.SpectralNormalization:
+            self.discriminator = self.nets.build_discriminator2D_SN(model_shape=(self.n_rows,self.n_cols, self.c_dims),
+                                                                    filters=self.d_filters, k_size=self.d_ksize, drop=False,
+                                                                    ln=self.ln, model_file=model_file_dis,summary=summary)
+        else :
+            self.discriminator = self.nets.build_discriminator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims),
+                                                             filters=self.d_filters, k_size=self.d_ksize, model_file=model_file_dis,
+                                                             ln=self.ln, drop=False, summary=summary)
+        self.encoder = self.nets.build_encoder2D(model_shape=(self.n_rows, self.n_cols, self.c_dims), z_size=self.z_size,
+                                                 filters=self.e_filters, k_size=self.e_ksize, model_file=model_file_enc,
+                                                 summary=summary)
+        
+        # Building AE model
+        input_layer = Input(shape=(self.n_rows, self.n_cols, self.c_dims), name='ae_input')
+        self.model = Model(inputs=[input_layer], outputs=[self.decoder(self.encoder(input_layer))], name='ae_model')
+
+        # define input placeholders
+        self.real_img = tf.placeholder(dtype=tf.float32, name="REAL_IMG", shape=(self.batch_size, self.n_rows, self.n_cols, self.c_dims))
+        self.z_noise = tf.placeholder(dtype=tf.float32, name="Z_NOISE", shape=(self.batch_size, self.z_size, ))
+        
+        # optimication of the latent space
+        self.z_noise_opt = tf.get_variable("gan_z_noise_optimize", shape=(self.batch_size, self.z_size), dtype=tf.float32, initializer=tf.random_normal_initializer)
+        self.z_noise_bn = (self.z_noise_opt - K.mean(self.z_noise_opt, axis=0)) / (K.var(self.z_noise_opt, axis=0) + K.epsilon())        
+        
+        # sinthezized images
+        self.fake_img = self.decoder(self.z_noise)
+        self.deco_img = self.decoder(self.encoder(self.real_img))
+        self.fake_imz = self.decoder(self.z_noise_bn)       
+        
+        # scaling image to [0 1]
+        self.real_img_scaled = (self.real_img + 1) / 2.0
+        self.deco_img_scaled = (self.deco_img + 1) / 2.0
+        self.fake_imz_scaled = (self.fake_imz + 1) / 2.0 
+                
+        self.D_real, self.D_real_logits = self.discriminator(self.real_img)
+        self.D_fake, self.D_fake_logits = self.discriminator(self.fake_img)
+        self.D_deco, self.D_deco_logits = self.discriminator(self.deco_img)
+        self.D_fakz, self.D_fakz_logits = self.discriminator(self.fake_imz)
+
+        """ Adversariar training lossses """
+        # Discriminator loss
+        self.d_loss_ = tf.reduce_mean(self.D_fake_logits) - tf.reduce_mean(self.D_real_logits)
+        # Generator loss
+        self.g_loss = -tf.reduce_mean(self.D_fake_logits)
+        
+        # Adding gradient penalty to discriminator
+        self.d_loss = self.d_loss_ + 10 * self.gradient_penalty()
+        
+        """ Encoder lossses """
+        # self.d_loss_enc = self.utils.cross_entropy_loss(tf.ones_like(self.D_deco),self.D_deco_logits)
+        self.e_loss_log = 100 * tf.reduce_mean(self.utils.cross_entropy(self.real_img_scaled, self.deco_img_scaled))
+        # self.e_loss = self.e_loss_log + self.d_loss_enc
+        self.e_loss = self.e_loss_log
+        
+        """ lantent space optimization losses """
+        # self.dz_loss = self.utils.cross_entropy_loss(tf.ones_like(self.D_fakz), self.D_fakz_logits)
+        self.gz_loss = 1000 * tf.reduce_mean(self.utils.cross_entropy(self.real_img_scaled, self.fake_imz_scaled))
+        # self.z_loss = self.gz_loss + 1.0 * self.dz_loss
+        self.z_loss = self.gz_loss
+
+        t_vars = tf.trainable_variables()
+        self.d_vars = [var for var in t_vars if 'gan_d_' in var.name]
+        self.g_vars = [var for var in t_vars if 'gan_g_' in var.name]
+        self.e_vars = [var for var in t_vars if 'gan_e_' in var.name]
+        self.z_vars = [var for var in t_vars if 'gan_z_' in var.name]
+        
+        """ compute reconstruction accuracies """ 
+        self.accuracy_e = self.utils.accuracy(self.real_img, self.deco_img)
+        self.accuracy_z = self.utils.accuracy(self.real_img, self.fake_imz)
+    
+    def gradient_penalty(self):
+        epsilon = tf.random_uniform(shape=[self.batch_size, 1, 1, 1], minval=0., maxval=1.)
+        img_inter = self.real_img * epsilon + ((1 - epsilon) * self.fake_img)
+        D_logits = self.discriminator(img_inter)
+        gradients = tf.gradients(D_logits, img_inter)[0]
+        slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), axis=[1,2,3]))
+        print(slopes)
+        gp_loss = tf.reduce_mean(tf.square(slopes - 1.0))
+        return gp_loss
+    
+    def train(self,
+              data_trn,
+              data_val=None,
+              epochs=1,
+              best_acc=-np.inf,
+              n_iterations=500,
+              patience=20,
+              split=0.9,
+              plots=True,
+              num_plots=4,
+              plot_freq=2,
+              reset_model=True):
+        
+        self.fit_gans(data_trn, data_val, epochs, best_acc, n_iterations, patience, split,
+                      plots=plots, num_plots=num_plots, plot_freq=plot_freq, reset_model=reset_model)
+        self.fit_encoder(data_trn, data_val, epochs, best_acc, patience, split,
+                         plots=plots, num_plots=num_plots, plot_freq=plot_freq, reset_model=reset_model)
+        
+    def fit_gans(self,
+                 data_trn_,
+                 data_val_=None,
+                 epochs=1,
+                 best_acc=-np.inf,
+                 n_iterations=500,
+                 patience=20,
+                 split=0.9,
+                 plots=True,
+                 num_plots=4,
+                 plot_freq=2,
+                 th_acc = 90,
+                 reset_model=True):
+        """
+        optimize the discriminator and generators models using adversarial training
+        """
+        # Define optimizers
+        d_optim = tf.compat.v1.train.AdamOptimizer(self.d_lr, beta1=self.beta1).minimize(self.d_loss, var_list=self.d_vars)
+        g_optim = tf.compat.v1.train.AdamOptimizer(self.g_lr, beta1=self.beta1).minimize(self.g_loss, var_list=self.g_vars)
+        z_optim = tf.compat.v1.train.AdamOptimizer(self.z_lr, beta1=self.beta1).minimize(self.z_loss, var_list=self.z_vars)
+        
+        self.sess = K.get_session()
+        init_gvars = tf.variables_initializer(self.d_vars + self.g_vars)
+        init_zvars = tf.variables_initializer(self.z_vars)
+        if reset_model:            
+            self.sess.run(init_gvars)
+            print ("Initializing GANs models variables ...")      
+        
+        # Setting training and validation samples
+        if data_val_ is None:
+            data_trn = data_trn_.copy()
+            np.random.shuffle(data_trn)
+            data_val = data_trn[int(split*len(data_trn)):]
+            data_trn = data_trn[:int(split*len(data_trn))]
+        else:
+            data_trn = data_trn_.copy()
+            data_val = data_val_.copy()            
+        
+        print("Starting GANs training ...")
+        g_step = 0
+        early_stop = False
+        loss_D, loss_G = [], []
+        best_loss_D = np.inf
+        patience_trn = patience
+        iterations = n_iterations
+        saved_checkpoint = False
+        n_critic = 5
+        for iteration in range(n_iterations*epochs):
+            #  Train Discriminator 
+            n_critic = 10 if g_step < 25 or (g_step + 1) % 500 == 0 else 5
+            for _ in range(n_critic):
+                z_samples = np.random.normal(0, 1, size=[self.batch_size, self.z_size]).astype(np.float32)
+                # Select a random batch of images
+                idx = np.random.choice(data_trn.shape[0], self.batch_size, replace=False)
+                imgs = data_trn[idx]
+                # Update D network
+                _, d_loss = self.sess.run([d_optim, self.d_loss],
+                                          feed_dict={self.real_img: imgs,
+                                                     self.z_noise: z_samples})
+                loss_D.append(-d_loss)
             
             #  Train Generator
             z_samples = np.random.normal(0, 1, size=[self.batch_size, self.z_size]).astype(np.float32)
@@ -736,15 +1117,15 @@ class WGAN2D_MPS(object):
             model.summary()
         return model
 
-
 class AlphaGAN_MPS(object):
     def __init__(self, input_shape,
                 d_filters=32, g_filters=32, e_filters=32, c_filters=3500,
                 d_ksize=5, g_ksize=5, e_ksize=5, z_size=500, batch_size=32,
                 d_lr=0.0002, g_lr=0.0002, e_lr=0.0002, c_lr=0.0002, beta1=0.5, alpha=1.0,
-                model_file=None, saving_path=None, name='geo_AlphaGAN_', summary=True
+                model_file=None, saving_path=None, name='geo_AlphaGAN_', 
+                SpectralNormalization=False,summary=True
                 ):
-
+        self.SpectralNormalization = SpectralNormalization
         self.saving_path = saving_path
         self.n_rows = input_shape[0]
         self.n_cols = input_shape[1]
@@ -792,13 +1173,23 @@ class AlphaGAN_MPS(object):
         self.decoder = self.nets.build_generator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims), z_size=self.z_size,
                                                    filters=self.g_filters, k_size=self.g_ksize, model_file=model_file_gen,
                                                    summary=summary)
-        self.discriminator = self.nets.build_discriminator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims),
+        if self.SpectralNormalization:
+            self.discriminator = self.nets.build_discriminator2D_SN(model_shape=(self.n_rows,self.n_cols, self.c_dims),
+                                                                    filters=self.d_filters, k_size=self.d_ksize, drop=False,
+                                                             model_file=model_file_dis,summary=summary)
+        else :
+            self.discriminator = self.nets.build_discriminator2D(model_shape=(self.n_rows, self.n_cols, self.c_dims),
                                                              filters=self.d_filters, k_size=self.d_ksize, drop=False, model_file=model_file_dis,
                                                              summary=summary)
         self.encoder = self.nets.build_encoder2D(model_shape=(self.n_rows, self.n_cols, self.c_dims), z_size=self.z_size,
                                                  filters=self.e_filters, k_size=self.e_ksize, bn=False, model_file=model_file_enc,
                                                  summary=summary)
-        self.code_discriminator = self.nets.build_code_discriminator(model_file=model_file_dis_code,
+        if self.SpectralNormalization:
+            self.code_discriminator = self.nets.build_code_discriminator_SN(model_file=model_file_dis_code,
+                                                                     filters=self.c_filters,z_size=self.z_size,
+                                                                     summary=summary)
+        else:
+            self.code_discriminator = self.nets.build_code_discriminator(model_file=model_file_dis_code,
                                                                      filters=self.c_filters,z_size=self.z_size,
                                                                      summary=summary)
         
@@ -1019,9 +1410,11 @@ class CycleGAN_MPS(object):
                 filters=32, batch_size=4, epsilon=0.3, Nr=5000, Nt=5000,
                 d_lr_pca=0.0002, d_lr_bin=0.0002, g_lr_pca=0.0002, g_lr_bin=0.0002,
                 d_ksize_pca=4, d_ksize_bin=4, g_ksize_pca=4, g_ksize_bin=4, beta1=0.5, alpha=10, d_drop=False,
-                model_file=None, saving_path=None, name='geo_CycleGAN_', summary=True
+                model_file=None, saving_path=None,SpectralNormalization=False,
+                 name='geo_CycleGAN_', summary=True
                 ):
         # TO-DO: mirar lo del z 
+        self.SpectralNormalization = SpectralNormalization
         self.saving_path = saving_path
         self.n_rows = input_shape[0]
         self.n_cols = input_shape[1]
@@ -1123,10 +1516,20 @@ class CycleGAN_MPS(object):
 
         # build network models
         K.clear_session()
-        self.discriminator_pca = self.nets.build_patch_discriminator(model_shape=(self.n_rows, self.n_cols, 1),
+        if self.SpectralNormalization:
+            self.discriminator_pca = self.nets.build_patch_discriminator_SN(model_shape=(self.n_rows, self.n_cols, 1),
+                                                                     filters=self.filters, k_size=self.d_ksize_pca, drop=self.d_drop, 
+                                                                     model_file=model_file_dis_pca, summary=summary, name='dis_pca_')                                                                     
+        else:
+            self.discriminator_pca = self.nets.build_patch_discriminator(model_shape=(self.n_rows, self.n_cols, 1),
                                                                      filters=self.filters, k_size=self.d_ksize_pca, drop=self.d_drop, 
                                                                      model_file=model_file_dis_pca, summary=summary, name='dis_pca_')
-        self.discriminator_bin = self.nets.build_patch_discriminator(model_shape=(self.n_rows, self.n_cols, self.c_dims), drop=self.d_drop,
+        if self.SpectralNormalization:
+            self.discriminator_bin = self.nets.build_patch_discriminator_SN(model_shape=(self.n_rows, self.n_cols, self.c_dims), drop=self.d_drop,
+                                                                     filters=self.filters, k_size=self.d_ksize_bin,
+                                                                     model_file=model_file_dis_bin, summary=summary, name='dis_bin_')
+        else:
+            self.discriminator_bin = self.nets.build_patch_discriminator(model_shape=(self.n_rows, self.n_cols, self.c_dims), drop=self.d_drop,
                                                                      filters=self.filters, k_size=self.d_ksize_bin,
                                                                      model_file=model_file_dis_bin, summary=summary, name='dis_bin_')
         self.decoder_pca = self.nets.build_resnet_generator(model_shape=(self.n_rows, self.n_cols, self.c_dims, 1),

@@ -19,16 +19,42 @@ from keras import backend as K
 from keras.objectives import binary_crossentropy
 from keras.models import model_from_json
 from keras.utils import to_categorical
-from keras_contrib.layers.normalization.instancenormalization import InstanceNormalization
+from keras_layer_normalization import LayerNormalization
 from Model.BiLinearUp import BilinearUpsampling
 from Model.Utils import Save_Model, PlotDataAE
 from Model.GansUtilities import Utilities
-
+from Model.SpectralNormalizationLayers import DenseSN, ConvSN2D
 import random
 
 class Layers2D(object):
     def __init__(self):
         pass
+    
+    def Conv2D_SN_Block(self,
+                     input_x,
+                     n_kernels,
+                     k_size=4,
+                     strides=2,
+                     padding='same',
+                     kernel_initializer='glorot_uniform',#RandomNormal(stddev=0.02),
+                     name='None',
+                     activation='leaky_relu',
+                     bias=True,
+                     bn_training=False):
+
+        x = ConvSN2D(n_kernels,
+                   kernel_size=k_size,
+                   strides=strides,
+                   padding=padding,
+                   kernel_initializer=kernel_initializer,
+                   name=name + '_conv2D_SN',
+                   use_bias=bias)(input_x)
+        
+        if activation is 'leaky_relu':
+            x = LeakyReLU(0.1, name=name + '_' + activation)(x)
+        else:
+            x = Activation(activation, name=name + '_' + activation)(x)
+        return x
     
     def Conv2D_Block(self,
                      input_x,
@@ -39,7 +65,7 @@ class Layers2D(object):
                      kernel_initializer=RandomNormal(stddev=0.02),
                      name='None',
                      activation='leaky_relu',
-                     insnorm=False,
+                     ln=False,
                      bn=True,
                      bias=True,
                      bn_training=False):
@@ -51,9 +77,9 @@ class Layers2D(object):
                    kernel_initializer=kernel_initializer,
                    name=name + '_conv2D',
                    use_bias=bias)(input_x)
-
-        if insnorm:
-            x = InstanceNormalization(axis=-1, name=name+'_insnorm')(x)
+        
+        if ln:
+            x = LayerNormalization(name=name+'_norm2')(x)
         elif bn:
             x = BatchNormalization(momentum=0.8, name=name + '_bn')(x, training=bn_training)
         if activation is 'leaky_relu':
@@ -70,7 +96,6 @@ class Layers2D(object):
                               padding='same',                           
                               activation='relu',
                               kernel_initializer=RandomNormal(stddev=0.02),
-                              insnorm=False,
                               bn=True,
                               bias=True,
                               bn_training=True,
@@ -83,17 +108,15 @@ class Layers2D(object):
                             kernel_initializer=kernel_initializer,
                             name=name+'_deconv2D',
                             use_bias=bias)(input_x)
-        if insnorm:
-            x = InstanceNormalization(axis=-1, name=name+'_insnorm')(x)
-        elif bn:
+        if bn:
             x = BatchNormalization(momentum=0.8, name=name+'_bn')(x, training=bn_training)
         if activation is not 'linear':
             x = Activation(activation, name=name+'_'+activation)(x)
         return x
     
-    def residual_block(self, input_x, n_kernels, k_size=4, activation='leaky_relu', insnorm=False, bn_training=False, add=True, name='name'):
-        x = self.Conv2D_Block(input_x, n_kernels, k_size=k_size, strides=1, insnorm=insnorm, bn_training=bn_training, activation=activation, name=name+'rba')
-        x = self.Conv2D_Block(x, n_kernels, k_size=k_size, strides=1, insnorm=insnorm, bn_training=bn_training, activation='linear', name=name+'rbb')
+    def residual_block(self, input_x, n_kernels, k_size=4, activation='leaky_relu', bn_training=False, add=True, name='name'):
+        x = self.Conv2D_Block(input_x, n_kernels, k_size=k_size, strides=1, bn_training=bn_training, activation=activation, name=name+'rba')
+        x = self.Conv2D_Block(x, n_kernels, k_size=k_size, strides=1, bn_training=bn_training, activation='linear', name=name+'rbb')
         if add:
             x = Add(name=name+'add')([x, input_x])
         else:
@@ -104,10 +127,51 @@ class Networks(object):
     def __init__(self):
         self.utils = Utilities()
         self.Conv2D_Block = Layers2D().Conv2D_Block
+        self.Conv2D_SN_Block = Layers2D().Conv2D_SN_Block
         self.Conv2DTranspose_Block = Layers2D().Conv2DTranspose_Block
         self.residual_block = Layers2D().residual_block
         
-    def build_discriminator2D(self, model_shape, filters=32, k_size=4, drop=True, rate=0.5, summary=False, model_file=None, name='gan_d_'):
+    def build_discriminator2D_SN(self, model_shape, filters=32, k_size=4, drop=True, rate=0.5, summary=False, model_file=None, name='gan_d_'):
+        """
+        Create a Discriminator Model using hyperparameters values defined as follows
+        """
+        if (model_file):
+            """
+            Load pretreined model
+            """
+            model = self.utils.build_pretrained_model(model_file)
+            if (summary):
+                model.summary()
+            return model
+        else:
+            """
+            Create a Discriminator Model using hyperparameters values defined as follows
+            """
+            n_rows = model_shape[0]
+            n_cols = model_shape[1]
+            c_dims = model_shape[2]
+
+            input_shape  = (n_rows, n_cols, c_dims)            
+            input_layer  = Input(shape=input_shape, name=name+'input')
+
+            d = self.Conv2D_SN_Block(input_layer, filters, k_size=k_size, name=name+'1')    # 30x30x32
+            d = self.Conv2D_SN_Block(d, 2*filters, k_size=k_size, name=name+'2')  # 15x15x64
+            d = self.Conv2D_SN_Block(d, 4*filters, k_size=k_size, name=name+'3')  # 8x8x128
+            d = self.Conv2D_SN_Block(d, 8*filters, strides=1, k_size=k_size, name=name+'4')  # 8x8x256
+
+            d = Flatten(name=name+'flatten')(d)
+            if drop:
+                d = Dropout(rate=rate, name=name+'dropout')(d, training=True)
+            logits = DenseSN(1, activation='linear', kernel_initializer='glorot_uniform',
+                             name=name+'dense_SN')(d) #RandomNormal(stddev=0.02)
+            out = Activation('sigmoid', name=name+'sigmoid')(logits)
+
+            model = Model(inputs=[input_layer], outputs=[out, logits], name='Discriminator')
+            if (summary):
+                model.summary()
+            return model
+        
+    def build_discriminator2D(self, model_shape, filters=32, k_size=4, drop=False, rate=0.5, extra_conv=False, summary=False, ln=False, model_file=None, name='gan_d_'):
         """
         Create a Discriminator Model using hyperparameters values defined as follows
         """
@@ -131,9 +195,13 @@ class Networks(object):
             input_layer  = Input(shape=input_shape, name=name+'input')
 
             d = self.Conv2D_Block(input_layer, filters, k_size=k_size, name=name+'1', bn=False)    # 30x30x32
-            d = self.Conv2D_Block(d, 2*filters, k_size=k_size, name=name+'2')  # 15x15x64
-            d = self.Conv2D_Block(d, 4*filters, k_size=k_size, name=name+'3')  # 8x8x128
-            d = self.Conv2D_Block(d, 8*filters, strides=1, k_size=k_size, name=name+'4')  # 8x8x256
+            d = self.Conv2D_Block(d, 2*filters, k_size=k_size, ln=ln, name=name+'2')  # 15x15x64
+            d = self.Conv2D_Block(d, 4*filters, k_size=k_size, ln=ln, name=name+'3')  # 8x8x128
+            if extra_conv:
+                d = self.Conv2D_Block(d, 8*filters, strides=2, k_size=k_size, ln=ln, name=name+'4')  # 8x8x256            
+                d = self.Conv2D_Block(d, 16*filters, strides=1, k_size=k_size, ln=ln, name=name+'5')  # 8x8x256
+            else:
+                d = self.Conv2D_Block(d, 8*filters, strides=1, k_size=k_size, ln=ln, name=name+'4')
 
             d = Flatten(name=name+'flatten')(d)
             if drop:
@@ -344,6 +412,36 @@ class Networks(object):
                 model.summary()
             return model
 
+    def build_code_discriminator_SN(self, filters=3500, z_size=500, summary=False,  model_file=None, name='gan_c_'):
+        if (model_file):
+            """
+            Load pretreined model
+            """
+            model = self.utils.build_pretrained_model(model_file)
+            if (summary):
+                model.summary()
+            return model
+        else:
+            
+            init = 'glorot_uniform'#            init = RandomNormal(stddev=0.02)
+
+            input_shape  = (z_size,)
+            input_layer = Input(shape=input_shape, name=name+'input')
+
+            a = DenseSN(filters, kernel_initializer=init, name=name+'denseSN_1')(input_layer)
+            a = LeakyReLU(0.1, name=name+'act_1')(a)
+
+            a = DenseSN(filters, kernel_initializer=init, name=name+'denseSN_2')(a)
+            a = LeakyReLU(0.1, name=name+'act_2')(a)
+
+            logits = DenseSN(1, kernel_initializer=init, name=name+'denseSN_3')(a)
+            out = Activation('sigmoid', name=name+'act')(logits)
+
+            model = Model(inputs=[input_layer], outputs=[out, logits], name='code_discriminator')
+            if (summary):
+                model.summary()
+            return model
+
     def build_patch_discriminator(self, model_shape, filters=32, k_size=4, drop=False, rate=0.5, summary=False, model_file=None, name='gan_d_'):
         """
         Create a Discriminator Model using hyperparameters values defined as follows
@@ -383,8 +481,8 @@ class Networks(object):
             if (summary):
                 model.summary()
             return model
-    
-    def build_patch_discriminator_(self, model_shape, filters=32, k_size=4, drop=False, rate=0.5, summary=False, model_file=None, name='gan_d_'):
+
+    def build_patch_discriminator_SN(self, model_shape, filters=32, k_size=4, drop=False, rate=0.5, summary=False, model_file=None, name='gan_d_'):
         """
         Create a Discriminator Model using hyperparameters values defined as follows
         """
@@ -400,29 +498,32 @@ class Networks(object):
             """
             Create a Discriminator Model using hyperparameters values defined as follows
             """
-            init = RandomNormal(stddev=0.02)
+            #init = RandomNormal(stddev=0.02)
+            init = 'glorot_uniform'
             n_rows = model_shape[0]
             n_cols = model_shape[1]
             c_dims = model_shape[2]
 
-            input_shape  = (n_rows, n_cols, c_dims)            
+            input_shape  = (n_rows, n_cols, c_dims)
             input_layer  = Input(shape=input_shape, name=name+'input')
 
-            d = self.Conv2D_Block(input_layer, filters, k_size=k_size, name=name+'1', bn=False)
-            d = self.Conv2D_Block(d, 2*filters, k_size=k_size, insnorm=True, name=name+'2')
-            d = self.Conv2D_Block(d, 4*filters, k_size=k_size, insnorm=True, name=name+'3')
-            d = self.Conv2D_Block(d, 8*filters, k_size=k_size, insnorm=True, strides=1, name=name+'4')
+            d = self.Conv2D_SN_Block(input_layer, filters, k_size=k_size, name=name+'1')
+            d = self.Conv2D_SN_Block(d, 2*filters, k_size=k_size, name=name+'2')
+            d = self.Conv2D_SN_Block(d, 4*filters, k_size=k_size, name=name+'3')
+            d = self.Conv2D_SN_Block(d, 8*filters, strides=1, k_size=k_size, name=name+'4')
+            d = self.Conv2D_SN_Block(d, 8*filters, strides=1, k_size=k_size, name=name+'5')
 
             if drop:
                 d = Dropout(rate=0.5, name=name+'_dropout')(d, training=True)
-            logits = Conv2D(1, k_size, strides=1, padding='same', kernel_initializer=init, name=name+'logits')(d)
+            logits = ConvSN2D(1, k_size, strides=1, padding='same', kernel_initializer=init, name=name+'logits')(d)
             out = Activation('sigmoid', name=name+'sigmoid')(logits)
 
             model = Model(inputs=[input_layer], outputs=[out, logits], name='Discriminator_'+name[-3:])
             if (summary):
                 model.summary()
             return model
-        
+
+      
     def build_resnet_generator(self, model_shape, filters=32, k_size=3, last_act='tanh', summary=False, model_file=None, name='gan_g_'):
         """
         Create a Generator Model with hyperparameters values defined as follows
@@ -488,7 +589,6 @@ class Networks(object):
             d3 = Activation('relu', name=name+'act_3')(d3)
 
             output = Conv2DTranspose(out_c_dims, 7, strides=1, padding='same',  kernel_initializer=init, name=name+'d_out')(d3) # rows, cols
-            # output = InstanceNormalization(axis=-1, name=name+'ins_norm')(output)
             output = Activation(last_act, name=name+last_act)(output)
 
             model = Model(inputs=[input_layer], outputs=[output], name='Generator'+name[-3:])
@@ -496,54 +596,6 @@ class Networks(object):
                 model.summary()
             return model
     
-    def build_resnet_generator_insnorm(self, model_shape, filters=32, k_size=3, last_act='tanh', n_residuals=9, summary=False, model_file=None, name='gan_g_'):
-        """
-        Create a Generator Model with hyperparameters values defined as follows
-        """
-        if (model_file):
-            """
-            Load pretreined model
-            """
-            model = self.utils.build_pretrained_model(model_file)
-            if (summary):
-                model.summary()
-            return model
-        else:
-            init = RandomNormal(stddev=0.02)
-            n_rows = model_shape[0]
-            n_cols = model_shape[1]
-            in_c_dims = model_shape[2]
-            out_c_dims = model_shape[3]
-            
-            n_rows_e1, n_rows_e2, n_rows_e4, n_rows_e8 = n_rows//1, n_rows//2, n_rows//4, n_rows//8
-            rows_matching = np.equal([2*n_rows_e2, 2*n_rows_e4, 2*n_rows_e8], [n_rows_e1, n_rows_e2, n_rows_e4])
-            index_rows = np.where(np.logical_not(rows_matching))[0]
-            
-            n_cols_e1, n_cols_e2, n_cols_e4, n_cols_e8 = n_cols//1, n_cols//2, n_cols//4, n_cols//8
-            cols_matching = np.equal([2*n_cols_e2, 2*n_cols_e4, 2*n_cols_e8], [n_cols_e1, n_cols_e2, n_cols_e4])
-            index_cols = np.where(np.logical_not(cols_matching))[0]
-          
-            input_shape = (n_rows, n_cols, in_c_dims)
-            input_layer = Input(shape=input_shape, name=name+'_input')
-            
-            x = self.Conv2D_Block(input_layer, filters, k_size=7, strides=1, activation='relu', bn=False, name=name+'e1') # rows, cols
-            x = self.Conv2D_Block(x, 2*filters, k_size=k_size, insnorm=True, activation='relu', name=name+'e2') # rows/2, cols/2
-            x = self.Conv2D_Block(x, 4*filters, k_size=k_size, insnorm=True, activation='relu', name=name+'e3') # rows/4, cols/4
-            
-            for i in range(n_residuals):
-                x = self.residual_block(x, n_kernels=4*filters, k_size=k_size, activation='relu', insnorm=True, add=False, name=name+str(i+1)+'_')
-                
-            x = self.Conv2DTranspose_Block(x, 2*filters, k_size=k_size, insnorm=True, name=name+'d1') # rows/2, cols/2            
-            x = self.Conv2DTranspose_Block(x, 1*filters, k_size=k_size, insnorm=True, name=name+'d2') # rows, cols
-
-            x = Conv2DTranspose(out_c_dims, 7, strides=1, padding='same',  kernel_initializer=init, name=name+'d_out')(x) # rows, cols
-            x = InstanceNormalization(axis=-1, name=name+'ins_norm')(x)
-            output = Activation(last_act, name=name+last_act)(x)
-
-            model = Model(inputs=[input_layer], outputs=[output], name='Generator'+name[-3:])
-            if (summary):
-                model.summary()
-            return model
         
 class Layers3D(object):
     def __init__(self):
@@ -551,19 +603,18 @@ class Layers3D(object):
     
     def Conv3D_Block(self,
                      input_x,
-                     n_kernels,
+                     filters,
                      k_size=4,
-                     strides=(2, 2, 2),
+                     strides=2,
                      padding='same',
                      activation='leaky_relu',
                      kernel_initializer=RandomNormal(stddev=0.02),                     
-                     insnorm=False,
                      bn=True,
                      bias=True,
                      bn_training=False,
                      name='None'):
 
-        x = Conv3D(n_kernels,
+        x = Conv3D(filters,
                    k_size,
                    strides=strides,
                    padding=padding,
@@ -571,9 +622,7 @@ class Layers3D(object):
                    name=name + '_conv3D',
                    use_bias=bias)(input_x)
 
-        if insnorm:
-            x = InstanceNormalization(axis=-1, name=name+'_insnorm')(x)
-        elif bn:
+        if bn:
             x = BatchNormalization(momentum=0.8, name=name + '_bn')(x, training=bn_training)
         if activation is 'leaky_relu':
             x = LeakyReLU(0.2, name=name + '_' + activation)(x)
@@ -589,7 +638,6 @@ class Layers3D(object):
                               padding='same',                           
                               activation='relu',
                               kernel_initializer=RandomNormal(stddev=0.02),
-                              insnorm=False,
                               bn=True,
                               bias=True,
                               bn_training=True,
@@ -602,17 +650,15 @@ class Layers3D(object):
                             kernel_initializer=kernel_initializer,
                             name=name+'_deconv2D',
                             use_bias=bias)(input_x)
-        if insnorm:
-            x = InstanceNormalization(axis=-1, name=name+'_insnorm')(x)
-        elif bn:
+        if bn:
             x = BatchNormalization(momentum=0.8, name=name+'_bn')(x, training=bn_training)
         if activation is not 'linear':
             x = Activation(activation, name=name+'_'+activation)(x)
         return x
     
-    def Residual3D_Block(self, input_x, n_kernels, k_size=4, activation='leaky_relu', insnorm=False, bn_training=False, add=True, name='name'):
-        x = self.Conv3D_Block(input_x, n_kernels, k_size=k_size, strides=1, insnorm=insnorm, bn_training=bn_training, activation=activation, name=name+'rba')
-        x = self.Conv3D_Block(x, n_kernels, k_size=k_size, strides=1, insnorm=insnorm, bn_training=bn_training, activation='linear', name=name+'rbb')
+    def Residual3D_Block(self, input_x, n_kernels, k_size=4, activation='leaky_relu', bn_training=False, add=True, name='name'):
+        x = self.Conv3D_Block(input_x, n_kernels, k_size=k_size, strides=1, bn_training=bn_training, activation=activation, name=name+'rba')
+        x = self.Conv3D_Block(x, n_kernels, k_size=k_size, strides=1, bn_training=bn_training, activation='linear', name=name+'rbb')
         if add:
             x = Add(name=name+'add')([x, input_x])
         else:
