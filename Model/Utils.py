@@ -16,18 +16,20 @@ from keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 from tensorflow.python.keras.utils.data_utils import get_file
 import requests
+import wget
 
 
 EPSILON = 1e-8
 
-ID_MPS45_TRAIN = "1wI1JL31VNOf6iDbJVot7Invw4xPyqBfa"
-ID_MPS45_TEST = "1FRNt-Q75Soi98PjCHCouaeE1bnCHWXby"
-ID_MPS60_TRAIN = "1S-LtS-zt7INOFB1yM8IFSO5gQS0f6ZAt"
-ID_MPS60_TEST = "1M_0r6TbBU4BZlgOq7EaWG85xYxbhZOhJ"
-ID_MPS100_TRAIN = "1s3FAjf2I3gNshwfYNBqi9gz3M0eQ5xpT"
-ID_MPS100_TEST = "1ouYAP0NNbmk47NbgVtnC1w7PWBku2WT-"
-ID_MPS40x200_TRAIN = "1SpCaIVqsIGVvayeGz-h7y_IZ2CgiV7SR"
-ID_MPS40x200_TEST = "1I53Hmh9LZeVtU2lGsS08Cim2n3NhCXBh"
+ID_MPS45_TRAIN = "1SrCyt8Vd9eQOV1b-biFRVimbdOS2-_TF"
+ID_MPS45_TEST = "1DNE_HJGt96zoGQDqUMTwgHBZkAC0yxqI"
+ID_MPS60_TRAIN = "1s5s8eDOi_sAcarzNsy4WEVRoc9Tiitwp"
+ID_MPS60_TEST = "1QzsLTRKBIIzoCtYObfa_EHI2TcDSAJi7"
+ID_MPS100_TRAIN = "16eZeCRIx2stRfreBbJshosCLJEnVcZ_c"
+ID_MPS100_TEST = "1KrUQUJfGO1wS69tA9gEiZzPJYyiGHzak"
+ID_MPS40x200_TRAIN = "1nGaE98hvO8ljDB9pvYQTk817h6Kn6xE9"
+ID_MPS40x200_TEST = "1YtZjbeWTFOQHCk-oQ3Rd_ClNG72mUCtR"
+    
 
 def MakeDirectory(path):  # mkdir_p
     import os
@@ -423,10 +425,16 @@ def PlotDataAE2(X,X_AE,digit_size=(28,28),cmap='jet',Only_Result=True,num=10,fig
     if path_file:
         plt.savefig(path_file)
     plt.show()
-
+    
+    
+def download_file_with_wget(id, destination):
+    url = "https://drive.google.com/u/0/uc?id="+id
+    #https://drive.google.com/u/1/uc?id=1DNE_HJGt96zoGQDqUMTwgHBZkAC0yxqI
+    print(url)
+    wget.download(url,destination )
+    
 def download_file_from_google_drive(id, destination):
     URL = "https://docs.google.com/uc?export=download"
-
     session = requests.Session()
 
     response = session.get(URL, params = { 'id' : id }, stream = True)
@@ -482,11 +490,13 @@ def download_tfrecord(name_train = "train.tfrecords", path = 'DataSet', name_dat
 
     if os.path.exists(_path_file_train) == False:
         print("Downloading data in", _path_file_train)
-        download_file_from_google_drive(id_train, _path_file_train)
+        #download_file_from_google_drive(id_train, _path_file_train)
+        download_file_with_wget(id_train, _path_file_train)
 
     if test:
         _path_file_test = os.path.join(path,name_dataset,name_test)
         if os.path.exists(_path_file_test) == False:
             print("Downloading data in", _path_file_test)
-            download_file_from_google_drive(id_test, _path_file_test)
+            #download_file_from_google_drive(id_test, _path_file_test)
+            download_file_with_wget(id_test, _path_file_test)
     print("Data Set is OK ")
